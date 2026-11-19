@@ -14,8 +14,8 @@ use self::components::level_menu_button::LevelMenuButton;
 use self::components::target_menu_button::TargetMenuButton;
 use self::labels::Labels;
 use self::state::LogsState;
-use crate::Timestamp;
 use crate::tracing::collector::GenericEventCollector;
+use crate::Timestamp;
 
 /// Log widget using the timestamp type of its collector.
 pub struct GenericLogs<T: Timestamp> {
@@ -54,7 +54,7 @@ impl<T: Timestamp> Widget for GenericLogs<T> {
         });
 
         let state = ui.memory_mut(|mem| {
-            let state_mem_id = ui.id();
+            let state_mem_id = ui.scope_id();
             mem.data
                 .get_temp_mut_or_insert_with(state_mem_id, || {
                     Arc::new(Mutex::new(LogsState::<T>::default()))
@@ -96,10 +96,10 @@ impl<T: Timestamp> Widget for GenericLogs<T> {
             if selected < filtered_count {
                 let event = state.cache.get(selected).clone();
                 let mut close = false;
-                egui::Panel::bottom(ui.id().with("detail_panel"))
+                egui::Panel::bottom(ui.scope_id().with("detail_panel"))
                     .resizable(false)
                     .frame(egui::Frame::side_top_panel(ui.style()))
-                    .show_inside(ui, |ui| {
+                    .show(ui, |ui| {
                         ui.horizontal(|ui| {
                             ui.strong(self.labels.event_details.as_ref());
                             ui.with_layout(
@@ -117,10 +117,7 @@ impl<T: Timestamp> Widget for GenericLogs<T> {
                             ui.label(event.time.format_short());
                             ui.separator();
                             ui.label(RichText::new(self.labels.level.as_ref()).weak());
-                            ui.colored_label(
-                                event.level.to_color32(),
-                                event.level.as_str(),
-                            );
+                            ui.colored_label(event.level.to_color32(), event.level.as_str());
                             ui.separator();
                             ui.label(RichText::new(self.labels.target.as_ref()).weak());
                             ui.label(&event.target);
@@ -131,18 +128,11 @@ impl<T: Timestamp> Widget for GenericLogs<T> {
                             let max_msg_lines = 25;
                             let lines: Vec<&str> = trimmed.lines().collect();
                             if lines.len() > max_msg_lines {
-                                let truncated: String =
-                                    lines[..max_msg_lines].join("\n");
-                                ui.add(
-                                    Label::new(truncated)
-                                        .wrap_mode(TextWrapMode::Wrap),
-                                );
+                                let truncated: String = lines[..max_msg_lines].join("\n");
+                                ui.add(Label::new(truncated).wrap_mode(TextWrapMode::Wrap));
                                 ui.weak(self.labels.message_too_long.as_ref());
                             } else {
-                                ui.add(
-                                    Label::new(trimmed)
-                                        .wrap_mode(TextWrapMode::Wrap),
-                                );
+                                ui.add(Label::new(trimmed).wrap_mode(TextWrapMode::Wrap));
                             }
                         }
                         if !event.fields.is_empty() {
@@ -150,9 +140,7 @@ impl<T: Timestamp> Widget for GenericLogs<T> {
                             ui.separator();
                             for (key, value) in &event.fields {
                                 ui.horizontal(|ui| {
-                                    ui.label(
-                                        RichText::new(format!("{key}:")).weak(),
-                                    );
+                                    ui.label(RichText::new(format!("{key}:")).weak());
                                     ui.label(value);
                                 });
                             }
@@ -167,135 +155,133 @@ impl<T: Timestamp> Widget for GenericLogs<T> {
         }
 
         // Log table fills remaining space — uniform row heights (O(1) scroll)
-        let response = ui.vertical(|ui| {
-            let mut table = TableBuilder::new(ui)
-            .striped(true)
-            .resizable(true)
-            .stick_to_bottom(true)
-            .sense(egui::Sense::click())
-            .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-            .column(Column::initial(100.0).at_least(60.0))
-            .column(Column::initial(60.0).at_least(40.0))
-            .column(Column::initial(140.0).at_least(60.0))
-            .column(Column::remainder().at_least(100.0).clip(true));
+        let response = ui
+            .vertical(|ui| {
+                let mut table = TableBuilder::new(ui)
+                    .striped(true)
+                    .resizable(true)
+                    .stick_to_bottom(true)
+                    .sense(egui::Sense::click())
+                    .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+                    .column(Column::initial(100.0).at_least(60.0))
+                    .column(Column::initial(60.0).at_least(40.0))
+                    .column(Column::initial(140.0).at_least(60.0))
+                    .column(Column::remainder().at_least(100.0).clip(true));
 
-            if state.scroll_to_bottom && filtered_count > 0 {
-                table = table
-                    .animate_scrolling(false)
-                    .scroll_to_row(filtered_count - 1, Some(egui::Align::BOTTOM));
-                state.scroll_to_bottom = false;
-            }
+                if state.scroll_to_bottom && filtered_count > 0 {
+                    table = table
+                        .animate_scrolling(false)
+                        .scroll_to_row(filtered_count - 1, Some(egui::Align::BOTTOM));
+                    state.scroll_to_bottom = false;
+                }
 
-            table.header(header_height, |mut header| {
-                header.col(|ui| {
-                    ui.label(self.labels.time.as_ref());
-                    let bottom = ui.max_rect().bottom();
-                    let full_width = ui.ctx().content_rect().x_range();
-                    ui.painter().hline(
-                        full_width,
-                        bottom,
-                        ui.visuals().widgets.noninteractive.bg_stroke,
-                    );
-                });
-                header.col(|ui| {
-                    LevelMenuButton::new(&self.labels)
-                        .state(&mut state.level_filter)
-                        .max_level(self.collector.max_level())
-                        .show(ui);
-                });
-                header.col(|ui| {
-                    TargetMenuButton::new(&self.labels)
-                        .state(&mut state.target_filter)
-                        .show(ui);
-                });
-                header.col(|ui| {
-                    ui.with_layout(
-                        egui::Layout::right_to_left(egui::Align::Center),
-                        |ui| {
-                            if ui.button(self.labels.clear.as_ref()).clicked() {
-                                self.collector.clear();
-                            }
-                            if ui.button(self.labels.to_bottom.as_ref()).clicked() {
-                                state.scroll_to_bottom = true;
-                            }
+                table
+                    .header(header_height, |mut header| {
+                        header.col(|ui| {
+                            ui.label(self.labels.time.as_ref());
+                            let bottom = ui.max_rect().bottom();
+                            let full_width = ui.ctx().content_rect().x_range();
+                            ui.painter().hline(
+                                full_width,
+                                bottom,
+                                ui.visuals().widgets.noninteractive.bg_stroke,
+                            );
+                        });
+                        header.col(|ui| {
+                            LevelMenuButton::new(&self.labels)
+                                .state(&mut state.level_filter)
+                                .max_level(self.collector.max_level())
+                                .show(ui);
+                        });
+                        header.col(|ui| {
+                            TargetMenuButton::new(&self.labels)
+                                .state(&mut state.target_filter)
+                                .show(ui);
+                        });
+                        header.col(|ui| {
                             ui.with_layout(
-                                egui::Layout::left_to_right(egui::Align::Center),
+                                egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
-                                    ui.label(self.labels.message.as_ref());
-                                    ui.weak(format!("({})", filtered_count));
+                                    if ui.button(self.labels.clear.as_ref()).clicked() {
+                                        self.collector.clear();
+                                    }
+                                    if ui.button(self.labels.to_bottom.as_ref()).clicked() {
+                                        state.scroll_to_bottom = true;
+                                    }
+                                    ui.with_layout(
+                                        egui::Layout::left_to_right(egui::Align::Center),
+                                        |ui| {
+                                            ui.label(self.labels.message.as_ref());
+                                            ui.weak(format!("({})", filtered_count));
+                                        },
+                                    );
                                 },
                             );
-                        },
-                    );
-                });
+                        });
+                    })
+                    .body(|body| {
+                        let selected = state.selected_row;
+                        let mut clicked_row = None;
+
+                        body.rows(row_height, filtered_count, |mut row| {
+                            row.set_hovered(false);
+                            let idx = row.index();
+                            let is_selected = Some(idx) == selected;
+                            let event = state.cache.get(idx);
+
+                            let mut row_clicked = false;
+
+                            row.col(|ui| {
+                                ui.style_mut().interaction.selectable_labels = false;
+                                if is_selected {
+                                    ui.visuals_mut().override_text_color =
+                                        Some(ui.visuals().strong_text_color());
+                                }
+                                let r = ui.label(event.time.format_short());
+                                row_clicked |= r.clicked();
+                            });
+
+                            row.col(|ui| {
+                                ui.style_mut().interaction.selectable_labels = false;
+                                let r = ui
+                                    .colored_label(event.level.to_color32(), event.level.as_str());
+                                row_clicked |= r.clicked();
+                            });
+
+                            row.col(|ui| {
+                                if is_selected {
+                                    ui.visuals_mut().override_text_color =
+                                        Some(ui.visuals().strong_text_color());
+                                }
+                                ui.add(Label::new(&event.target).wrap_mode(TextWrapMode::Truncate));
+                            });
+
+                            row.col(|ui| {
+                                if is_selected {
+                                    ui.visuals_mut().override_text_color =
+                                        Some(ui.visuals().strong_text_color());
+                                }
+                                ui.add(
+                                    Label::new(&event.collapsed_summary)
+                                        .wrap_mode(TextWrapMode::Truncate),
+                                );
+                            });
+
+                            if row_clicked || row.response().clicked() {
+                                clicked_row = Some(idx);
+                            }
+                        });
+
+                        if let Some(idx) = clicked_row {
+                            state.selected_row = if Some(idx) == selected {
+                                None
+                            } else {
+                                Some(idx)
+                            };
+                        }
+                    });
             })
-            .body(|body| {
-                let selected = state.selected_row;
-                let mut clicked_row = None;
-
-                body.rows(row_height, filtered_count, |mut row| {
-                    row.set_hovered(false);
-                    let idx = row.index();
-                    let is_selected = Some(idx) == selected;
-                    let event = state.cache.get(idx);
-
-                    let mut row_clicked = false;
-
-                    row.col(|ui| {
-                        ui.style_mut().interaction.selectable_labels = false;
-                        if is_selected {
-                            ui.visuals_mut().override_text_color =
-                                Some(ui.visuals().strong_text_color());
-                        }
-                        let r = ui.label(event.time.format_short());
-                        row_clicked |= r.clicked();
-                    });
-
-                    row.col(|ui| {
-                        ui.style_mut().interaction.selectable_labels = false;
-                        let r = ui.colored_label(
-                            event.level.to_color32(),
-                            event.level.as_str(),
-                        );
-                        row_clicked |= r.clicked();
-                    });
-
-                    row.col(|ui| {
-                        if is_selected {
-                            ui.visuals_mut().override_text_color =
-                                Some(ui.visuals().strong_text_color());
-                        }
-                        ui.add(
-                            Label::new(&event.target)
-                                .wrap_mode(TextWrapMode::Truncate),
-                        );
-                    });
-
-                    row.col(|ui| {
-                        if is_selected {
-                            ui.visuals_mut().override_text_color =
-                                Some(ui.visuals().strong_text_color());
-                        }
-                        ui.add(
-                            Label::new(&event.collapsed_summary)
-                                .wrap_mode(TextWrapMode::Truncate),
-                        );
-                    });
-
-                    if row_clicked || row.response().clicked() {
-                        clicked_row = Some(idx);
-                    }
-                });
-
-                if let Some(idx) = clicked_row {
-                    state.selected_row = if Some(idx) == selected {
-                        None
-                    } else {
-                        Some(idx)
-                    };
-                }
-            });
-        }).response;
+            .response;
 
         response
     }
